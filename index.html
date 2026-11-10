@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel Interativo - Eleitorado ES</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --bg-color: #f4f7fa; --card-bg: #ffffff; --text-color: #333333; --primary-color: #2b6cb0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px; }
+        h1 { text-align: center; color: var(--primary-color); margin-bottom: 10px; }
+        .controls { text-align: center; margin-bottom: 30px; }
+        select { padding: 10px; font-size: 1.1rem; border-radius: 5px; border: 1px solid #ccc; width: 100%; max-width: 400px; }
+        .dashboard-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; max-width: 1200px; margin: 0 auto; }
+        .card { background-color: var(--card-bg); border-radius: 10px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .kpi { text-align: center; display: flex; flex-direction: column; justify-content: center; }
+        .kpi h2 { font-size: 1.2rem; color: #666; margin-bottom: 10px; }
+        .kpi .number { font-size: 2.5rem; font-weight: bold; color: var(--primary-color); }
+        canvas { max-width: 100%; }
+        .loading { text-align: center; font-size: 1.5rem; color: #666; margin-top: 50px; }
+    </style>
+</head>
+<body>
+    <h1>📊 Painel Interativo - Eleitorado (ES)</h1>
+    
+    <div class="controls">
+        <select id="municipioSelect">
+            <option value="">Carregando municípios...</option>
+        </select>
+    </div>
+
+    <div id="loading" class="loading">Lendo a base de dados do TSE...</div>
+
+    <div class="dashboard-container" id="dashboard" style="display: none;">
+        <div class="card kpi">
+            <h2>Total de Eleitores Ativos</h2>
+            <div class="number" id="kpiTotal">0</div>
+            <h2 style="margin-top:20px;">Eleitores com Deficiência</h2>
+            <div class="number" id="kpiDeficiencia" style="color: #e53e3e;">0</div>
+        </div>
+        <div class="card">
+            <h2>Eleitores por Gênero</h2>
+            <canvas id="chartGenero"></canvas>
+        </div>
+        <div class="card">
+            <h2>Grau de Instrução</h2>
+            <canvas id="chartInstrucao"></canvas>
+        </div>
+        <div class="card" style="grid-column: 1 / -1;">
+            <h2>Distribuição por Faixa Etária</h2>
+            <canvas id="chartIdade"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let eleitoradoData = {};
+        let charts = {};
+
+        // Configuração de cores globais para os gráficos
+        Chart.defaults.color = '#4a5568';
+        Chart.defaults.font.family = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+
+        async function loadData() {
+            try {
+                const response = await fetch('dados_municipios.json');
+                eleitoradoData = await response.json();
+                
+                const select = document.getElementById('municipioSelect');
+                select.innerHTML = '';
+                
+                // Extrair os nomes, removendo o "GERAL" para colocá-lo no topo
+                const municipios = Object.keys(eleitoradoData).filter(m => m !== "ESPÍRITO SANTO (GERAL)").sort();
+                
+                // Adicionar a opção geral no topo
+                const optionGeral = document.createElement('option');
+                optionGeral.value = "ESPÍRITO SANTO (GERAL)";
+                optionGeral.textContent = "ESPÍRITO SANTO (GERAL)";
+                select.appendChild(optionGeral);
+                
+                // Adicionar o resto em ordem alfabética
+                municipios.forEach(m => {
+                    const option = document.createElement('option');
+                    option.value = m;
+                    option.textContent = m;
+                    select.appendChild(option);
+                });
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'grid';
+
+                // Inicializar painel com o GERAL
+                updateDashboard("ESPÍRITO SANTO (GERAL)");
+                
+                // Adicionar evento de mudança no select
+                select.addEventListener('change', (e) => updateDashboard(e.target.value));
+
+            } catch (error) {
+                document.getElementById('loading').innerHTML = "Erro ao carregar o arquivo dados_municipios.json. Certifique-se de que ele está na mesma pasta.";
+            }
+        }
+
+        function updateDashboard(municipioName) {
+            const data = eleitoradoData[municipioName];
+            if (!data) return;
+
+            // Update KPIs (formatando com ponto milhar)
+            document.getElementById('kpiTotal').textContent = data.total.toLocaleString('pt-BR');
+            document.getElementById('kpiDeficiencia').textContent = data.deficiencia.toLocaleString('pt-BR');
+
+            // Preparar arrays
+            const generoLabels = Object.keys(data.genero);
+            const generoValues = Object.values(data.genero);
+
+            const instrucaoLabels = Object.keys(data.instrucao);
+            const instrucaoValues = Object.values(data.instrucao);
+
+            const idadeLabels = Object.keys(data.idade);
+            const idadeValues = Object.values(data.idade);
+
+            // Destruir gráficos antigos se existirem para recriar
+            if (charts.genero) charts.genero.destroy();
+            if (charts.instrucao) charts.instrucao.destroy();
+            if (charts.idade) charts.idade.destroy();
+
+            // 1. Gráfico de Gênero
+            charts.genero = new Chart(document.getElementById('chartGenero'), {
+                type: 'doughnut',
+                data: {
+                    labels: generoLabels,
+                    datasets: [{
+                        data: generoValues,
+                        backgroundColor: ['#ed64a6', '#4299e1', '#a0aec0']
+                    }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+            });
+
+            // 2. Gráfico de Instrução
+            charts.instrucao = new Chart(document.getElementById('chartInstrucao'), {
+                type: 'bar',
+                data: {
+                    labels: instrucaoLabels,
+                    datasets: [{
+                        label: 'Qtd de Eleitores',
+                        data: instrucaoValues,
+                        backgroundColor: '#48bb78'
+                    }]
+                },
+                options: { 
+                    indexAxis: 'y', 
+                    responsive: true,
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            // 3. Gráfico de Idade
+            charts.idade = new Chart(document.getElementById('chartIdade'), {
+                type: 'bar',
+                data: {
+                    labels: idadeLabels,
+                    datasets: [{
+                        label: 'Qtd de Eleitores',
+                        data: idadeValues,
+                        backgroundColor: '#805ad5'
+                    }]
+                },
+                options: { 
+                    responsive: true,
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        // Iniciar
+        loadData();
+    </script>
+</body>
+</html>
